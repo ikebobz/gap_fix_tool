@@ -1,0 +1,14 @@
+.env
+.pythonlibs/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.xlsx
+*.xls
+venv/
+ENV/
+.venv
+*.log
+.DS_Store
