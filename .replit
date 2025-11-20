@@ -16,15 +16,20 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Run Script"
+args = "Streamlit App"
 
 [[workflows.workflow]]
-name = "Run Script"
+name = "Streamlit App"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "echo \"HIV Query Script Ready\" && echo \"\" && echo \"To run the script:\" && echo \"  python execute_hiv_query.py person_uuids_sample.xlsx\" && echo \"\" && echo \"Don't forget to configure your database credentials in .env file first!\""
+args = "streamlit run app.py --server.port 5000 --server.address 0.0.0.0 --server.headless true"
+waitForPort = 5000
 
 [workflows.workflow.metadata]
-outputType = "console"
+outputType = "webview"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
