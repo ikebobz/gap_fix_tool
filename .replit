@@ -5,3 +5,26 @@ expertMode = true
 [nix]
 channel = "stable-25_05"
 packages = ["glibcLocales"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Run Script"
+
+[[workflows.workflow]]
+name = "Run Script"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"HIV Query Script Ready\" && echo \"\" && echo \"To run the script:\" && echo \"  python execute_hiv_query.py person_uuids_sample.xlsx\" && echo \"\" && echo \"Don't forget to configure your database credentials in .env file first!\""
+
+[workflows.workflow.metadata]
+outputType = "console"

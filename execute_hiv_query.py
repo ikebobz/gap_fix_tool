@@ -40,6 +40,7 @@ def execute_hiv_query(uuids):
         return False
     
     conn = None
+    cursor = None
     try:
         conn = psycopg2.connect(
             host=db_host,
@@ -51,16 +52,14 @@ def execute_hiv_query(uuids):
         
         cursor = conn.cursor()
         
-        uuid_list = ', '.join([f"'{uuid}'" for uuid in uuids])
-        
-        query = f"""
+        query = """
         with t as (
-            select uuid as person_uuid from patient_person where uuid in ({uuid_list})
+            select uuid as person_uuid from patient_person where uuid = ANY(%s)
         )
 
         insert into hiv_observation (created_date,created_by,facility_id,date_of_observation,person_uuid,type,uuid,data,archived,visit_id)
         select current_date,'add_verification_status',1759,current_date,person_uuid,'Client Verification',uuid_generate_v4(),
-        '{{"attempt": [{{"comment": "", "outcome": "valid", "dateOfAttempt": "2025-08-25", "verificationStatus": "Records Verified", "verificationAttempts": "Biometric recapture"}}]}}',
+        '{"attempt": [{"comment": "", "outcome": "valid", "dateOfAttempt": "2025-08-25", "verificationStatus": "Records Verified", "verificationAttempts": "Biometric recapture"}]}',
         0,uuid_generate_v4()
         from t where person_uuid is not null;
         """
@@ -70,7 +69,7 @@ def execute_hiv_query(uuids):
         """
         
         print("\n--- Executing INSERT query ---")
-        cursor.execute(query)
+        cursor.execute(query, (uuids,))
         insert_count = cursor.rowcount
         print(f"Inserted {insert_count} records into hiv_observation")
         
@@ -81,9 +80,6 @@ def execute_hiv_query(uuids):
         
         conn.commit()
         print("\n✓ Transaction committed successfully")
-        
-        cursor.close()
-        conn.close()
         
         return True
         
@@ -98,6 +94,11 @@ def execute_hiv_query(uuids):
         if conn:
             conn.rollback()
         return False
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 def main():
     excel_file = 'person_uuids.xlsx'

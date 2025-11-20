@@ -75,8 +75,18 @@ The script will:
 
 ## Requirements
 
+### Python Dependencies
 - Python 3.11+
 - pandas
 - openpyxl
 - psycopg2-binary
 - python-dotenv
+
+### Database Requirements
+- PostgreSQL database with LAMISPLUS schema
+- Required PostgreSQL extension: `uuid-ossp` (for uuid_generate_v4() function)
+  
+  To enable the extension if not already available:
+  ```sql
+  CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+  ```
