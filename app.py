@@ -10,7 +10,9 @@ from services import (
     execute_verification_query,
     execute_lab_sync,
     insert_pmtct_record,
-    insert_pmtct_batch
+    insert_pmtct_batch,
+    execute_eac_fix,
+    execute_eac_fix_filtered
 )
 from services.lab_results import execute_lab_sync_filtered
 
@@ -121,9 +123,10 @@ def validate_age_at_test(value):
             return val, None
     return None, f"Invalid age_at_test '{normalized}' (allowed: Less than 72hours, Less than 2 months, 2 -12 months, Greater than 12 months)"
 
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "📋 Client Verification Import",
-    "🔬 Fix Lab Result Round Off Error", 
+    "🔬 Fix Lab Result Round Off Error",
+    "🔧 Fix EAC",
     "👶 PMTCT Infant PCR"
 ])
 
@@ -257,6 +260,71 @@ WHERE r.uuid = s.uuid
         st.caption("⚠️ Configure database to enable")
 
 with tab3:
+    st.subheader("Fix EAC Records")
+    st.markdown("Archive EAC records that have no associated sessions in the `hiv_eac` table.")
+    
+    st.info("""
+    **What this does:**
+    - Finds EAC records with no associated sessions in `hiv_eac_session`
+    - Sets `archived = 5` for those records
+    """)
+    
+    with st.expander("View SQL Query", expanded=False):
+        st.code("""
+UPDATE hiv_eac eac 
+SET archived = 5 
+WHERE NOT EXISTS (
+    SELECT * FROM hiv_eac_session hes 
+    WHERE eac_id = eac.uuid
+)
+        """, language="sql")
+    
+    eac_file = st.file_uploader(
+        "Upload Excel file with UUIDs to filter (optional)",
+        type=['xlsx'],
+        key="eac_upload",
+        help="Optional: Limit fix to specific UUIDs. Leave empty to fix all matching records."
+    )
+    
+    eac_uuids = None
+    if eac_file is not None:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+            tmp_file.write(eac_file.getvalue())
+            tmp_file_path = tmp_file.name
+        
+        result = read_uuids_from_excel(tmp_file_path, column_name='uuid')
+        if not result['success']:
+            result = read_uuids_from_excel(tmp_file_path, column_name='person_uuid')
+        os.unlink(tmp_file_path)
+        
+        if result['success']:
+            eac_uuids = result['uuids']
+            st.success(f"✓ File uploaded: {eac_file.name}")
+            st.metric("UUIDs to filter", result['count'])
+        else:
+            st.warning(f"Could not read UUIDs: {result['error']}")
+            st.info("Proceeding without UUID filter - will fix all matching records")
+    
+    if db_configured:
+        if st.button("🔧 Run EAC Fix", type="primary", key="eac_fix_btn"):
+            with st.spinner("Fixing EAC records..."):
+                if eac_uuids:
+                    exec_result = execute_eac_fix_filtered(eac_uuids)
+                else:
+                    exec_result = execute_eac_fix()
+            
+            if exec_result['success']:
+                st.success("✅ EAC fix completed successfully!")
+                st.metric("Records Updated", exec_result['update_count'])
+                if exec_result['update_count'] > 0:
+                    st.balloons()
+            else:
+                st.error(f"❌ Failed: {exec_result['error']}")
+    else:
+        st.button("🔧 Run EAC Fix", type="primary", disabled=True, key="eac_fix_btn_disabled")
+        st.caption("⚠️ Configure database to enable")
+
+with tab4:
     st.subheader("PMTCT Infant PCR Data Entry")
     st.markdown("Insert infant PCR records into the `pmtct_infant_pcr` table.")
     

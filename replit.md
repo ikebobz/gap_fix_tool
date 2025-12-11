@@ -4,9 +4,10 @@
 A multi-purpose web application for importing and syncing data in the LAMISPLUS PostgreSQL database. Provides both web UI (Streamlit) and command-line interfaces for different data operations.
 
 ## Current State
-The project is complete with 3 use cases:
+The project is complete with 4 use cases:
 - ✓ Client Verification Import - Upload Excel with UUIDs, insert verification records
-- ✓ Lab Result Sync - Sync test results from lims_result to laboratory_result
+- ✓ Fix Lab Result Round Off Error - Sync test results from lims_result to laboratory_result
+- ✓ Fix EAC - Archive EAC records with no associated sessions
 - ✓ PMTCT Infant PCR - Single record form entry or bulk Excel import
 
 ## Recent Changes
@@ -29,7 +30,7 @@ The project is complete with 3 use cases:
 ### Files
 ```
 .
-├── app.py                      # Streamlit web interface (3 tabs)
+├── app.py                      # Streamlit web interface (4 tabs)
 ├── execute_hiv_query.py        # CLI for verification import
 ├── hiv_service.py              # Backward compatibility wrapper
 ├── services/
@@ -38,6 +39,7 @@ The project is complete with 3 use cases:
 │   ├── excel.py                # Excel file reading utilities
 │   ├── verification.py         # Client verification operations
 │   ├── lab_results.py          # Lab result sync operations
+│   ├── eac.py                  # EAC fix operations
 │   └── pmtct.py                # PMTCT infant PCR operations
 ├── person_uuids_sample.xlsx    # Sample data file
 ├── .env.example                # Database configuration template
@@ -51,12 +53,17 @@ The project is complete with 3 use cases:
 - Inserts verification records into `hiv_observation`
 - Fixes date errors in `hiv_status_tracker` (0209 → 2009)
 
-**2. Lab Result Sync**
+**2. Fix Lab Result Round Off Error**
 - Syncs `test_result` to `result_reported` in `laboratory_result`
 - Only processes numeric results matching `\d+\.\d+`
 - Optional UUID filter from Excel upload
 
-**3. PMTCT Infant PCR**
+**3. Fix EAC**
+- Archives EAC records with no associated sessions
+- Sets `archived = 5` for orphaned `hiv_eac` records
+- Optional UUID filter from Excel upload
+
+**4. PMTCT Infant PCR**
 - Single record form entry with validation
 - Bulk import from Excel with column mapping
 - Proper date parsing (multiple formats)
