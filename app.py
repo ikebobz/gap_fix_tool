@@ -84,7 +84,11 @@ AGE_AT_TEST_OPTIONS = {
 }
 AGE_AT_TEST_VALUES = set(AGE_AT_TEST_OPTIONS.values())
 
-VALID_RESULTS = {'positive', 'negative', 'indeterminate', 'pending'}
+RESULTS_OPTIONS = {
+    'Positive': 'INFANT_PCR_RESULT_POSITIVE',
+    'Negative': 'INFANT_PCR_RESULT_NEGATIVE'
+}
+RESULTS_VALUES = set(RESULTS_OPTIONS.values())
 
 def validate_test_type(value):
     if not value:
@@ -105,9 +109,12 @@ def validate_results(value):
     normalized = normalize_string(value)
     if not normalized:
         return None, "Empty results"
-    if normalized.lower() in VALID_RESULTS:
-        return normalized.title(), None
-    return None, f"Invalid results '{normalized}' (allowed: Positive, Negative, Indeterminate, Pending)"
+    if normalized in RESULTS_VALUES:
+        return normalized, None
+    for label, val in RESULTS_OPTIONS.items():
+        if normalized.lower() == label.lower():
+            return val, None
+    return None, f"Invalid results '{normalized}' (allowed: Positive, Negative)"
 
 def validate_age_at_test(value):
     if not value:
@@ -369,9 +376,9 @@ with tab4:
                     options=[""] + list(TEST_TYPE_OPTIONS.keys()),
                     index=0
                 )
-                results = st.selectbox(
+                results_label = st.selectbox(
                     "Results *",
-                    options=["", "Positive", "Negative", "Indeterminate", "Pending"],
+                    options=[""] + list(RESULTS_OPTIONS.keys()),
                     index=0
                 )
             
@@ -416,11 +423,12 @@ with tab4:
                     st.error("❌ Test Type is required")
                 elif not age_at_test_label:
                     st.error("❌ Age at Test is required")
-                elif not results:
+                elif not results_label:
                     st.error("❌ Results is required")
                 else:
                     test_type_value = TEST_TYPE_OPTIONS.get(test_type_label)
                     age_at_test_value = AGE_AT_TEST_OPTIONS.get(age_at_test_label)
+                    results_value = RESULTS_OPTIONS.get(results_label)
                     
                     record_data = {
                         'visit_date': visit_date,
@@ -432,7 +440,7 @@ with tab4:
                         'date_sample_sent': parse_date_value(date_sample_sent_str),
                         'date_result_received_at_facility': parse_date_value(date_result_received_facility_str),
                         'date_result_received_by_caregiver': parse_date_value(date_result_received_caregiver_str),
-                        'results': results,
+                        'results': results_value,
                         'unique_uuid': unique_uuid or None
                     }
                     
