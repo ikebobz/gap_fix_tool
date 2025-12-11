@@ -15,25 +15,24 @@ st.markdown("Import client verification records into the LAMISPLUS database")
 st.markdown("---")
 
 credential_check = validate_db_credentials()
-if not credential_check['success']:
-    st.error("⚠️ Database Configuration Required")
-    st.warning(credential_check['error'])
-    st.info("""
-    **Setup Instructions:**
-    1. Create a `.env` file in your project directory
-    2. Add your database credentials:
-       ```
-       DB_HOST=your_host
-       DB_PORT=5432
-       DB_NAME=LAMISPLUS
-       DB_USER=your_username
-       DB_PASSWORD=your_password
-       ```
-    3. Restart the application
-    """)
-    st.stop()
+db_configured = credential_check['success']
 
-st.success("✓ Database credentials configured")
+if db_configured:
+    st.success("✓ Database credentials configured")
+else:
+    st.warning("⚠️ Preview Mode - Database not configured")
+    with st.expander("Setup Instructions (click to expand)", expanded=False):
+        st.markdown("""
+        To connect to your database, create a `.env` file with:
+        ```
+        DB_HOST=your_host
+        DB_PORT=5432
+        DB_NAME=LAMISPLUS
+        DB_USER=your_username
+        DB_PASSWORD=your_password
+        ```
+        Then restart the application.
+        """)
 
 st.markdown("---")
 
@@ -84,12 +83,22 @@ if uploaded_file is not None:
         col1, col2, col3 = st.columns([1, 1, 2])
         
         with col1:
-            execute_button = st.button(
-                "Execute Query",
-                type="primary",
-                use_container_width=True,
-                disabled=result['count'] == 0
-            )
+            if db_configured:
+                execute_button = st.button(
+                    "Execute Query",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=result['count'] == 0
+                )
+            else:
+                st.button(
+                    "Execute Query",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=True
+                )
+                st.caption("⚠️ Configure database to enable")
+                execute_button = False
         
         if execute_button:
             with st.spinner("Executing database operations..."):
