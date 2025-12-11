@@ -11,8 +11,7 @@ from services import (
     execute_lab_sync,
     insert_pmtct_record,
     insert_pmtct_batch,
-    execute_eac_fix,
-    execute_eac_fix_filtered
+    execute_eac_fix
 )
 from services.lab_results import execute_lab_sync_filtered
 
@@ -265,25 +264,27 @@ with tab3:
     
     st.info("""
     **What this does:**
-    - Finds EAC records with no associated sessions in `hiv_eac_session`
-    - Sets `archived = 5` for those records
+    - Filters EAC records by `person_uuid` from uploaded Excel file
+    - Only updates records with no associated sessions in `hiv_eac_session`
+    - Sets `archived = 5` for matching records
     """)
     
     with st.expander("View SQL Query", expanded=False):
         st.code("""
 UPDATE hiv_eac eac 
 SET archived = 5 
-WHERE NOT EXISTS (
+WHERE person_uuid IN (... values from Excel ...)
+AND NOT EXISTS (
     SELECT * FROM hiv_eac_session hes 
     WHERE eac_id = eac.uuid
 )
         """, language="sql")
     
     eac_file = st.file_uploader(
-        "Upload Excel file with UUIDs to filter (optional)",
+        "Upload Excel file with person_uuid column",
         type=['xlsx'],
         key="eac_upload",
-        help="Optional: Limit fix to specific UUIDs. Leave empty to fix all matching records."
+        help="Required: Excel file must contain a column named 'person_uuid'"
     )
     
     eac_uuids = None
@@ -292,37 +293,41 @@ WHERE NOT EXISTS (
             tmp_file.write(eac_file.getvalue())
             tmp_file_path = tmp_file.name
         
-        result = read_uuids_from_excel(tmp_file_path, column_name='uuid')
-        if not result['success']:
-            result = read_uuids_from_excel(tmp_file_path, column_name='person_uuid')
+        result = read_uuids_from_excel(tmp_file_path, column_name='person_uuid')
         os.unlink(tmp_file_path)
         
         if result['success']:
             eac_uuids = result['uuids']
             st.success(f"✓ File uploaded: {eac_file.name}")
-            st.metric("UUIDs to filter", result['count'])
-        else:
-            st.warning(f"Could not read UUIDs: {result['error']}")
-            st.info("Proceeding without UUID filter - will fix all matching records")
-    
-    if db_configured:
-        if st.button("🔧 Run EAC Fix", type="primary", key="eac_fix_btn"):
-            with st.spinner("Fixing EAC records..."):
-                if eac_uuids:
-                    exec_result = execute_eac_fix_filtered(eac_uuids)
-                else:
-                    exec_result = execute_eac_fix()
+            st.metric("Person UUIDs Found", result['count'])
             
-            if exec_result['success']:
-                st.success("✅ EAC fix completed successfully!")
-                st.metric("Records Updated", exec_result['update_count'])
-                if exec_result['update_count'] > 0:
-                    st.balloons()
+            with st.expander("View UUIDs", expanded=False):
+                for idx, uuid in enumerate(eac_uuids[:50], 1):
+                    st.code(f"{idx}. {uuid}", language=None)
+                if result['count'] > 50:
+                    st.info(f"... and {result['count'] - 50} more")
+            
+            if db_configured:
+                if st.button("🔧 Run EAC Fix", type="primary", key="eac_fix_btn"):
+                    with st.spinner("Fixing EAC records..."):
+                        exec_result = execute_eac_fix(eac_uuids)
+                    
+                    if exec_result['success']:
+                        st.success("✅ EAC fix completed successfully!")
+                        st.metric("Records Updated", exec_result['update_count'])
+                        if exec_result['update_count'] > 0:
+                            st.balloons()
+                    else:
+                        st.error(f"❌ Failed: {exec_result['error']}")
             else:
-                st.error(f"❌ Failed: {exec_result['error']}")
+                st.button("🔧 Run EAC Fix", type="primary", disabled=True, key="eac_fix_btn_disabled")
+                st.caption("⚠️ Configure database to enable")
+        else:
+            st.error(f"❌ {result['error']}")
+            if result.get('available_columns'):
+                st.warning(f"Available columns: {', '.join(result['available_columns'])}")
     else:
-        st.button("🔧 Run EAC Fix", type="primary", disabled=True, key="eac_fix_btn_disabled")
-        st.caption("⚠️ Configure database to enable")
+        st.info("👆 Upload an Excel file with person_uuid column to begin")
 
 with tab4:
     st.subheader("PMTCT Infant PCR Data Entry")

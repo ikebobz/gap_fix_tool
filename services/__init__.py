@@ -3,4 +3,4 @@ from .excel import read_uuids_from_excel, read_excel_file
 from .verification import execute_verification_query
 from .lab_results import execute_lab_sync, execute_lab_sync_filtered
 from .pmtct import insert_pmtct_record, insert_pmtct_batch
-from .eac import execute_eac_fix, execute_eac_fix_filtered
+from .eac import execute_eac_fix
