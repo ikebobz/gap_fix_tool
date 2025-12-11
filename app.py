@@ -69,7 +69,20 @@ def normalize_string(value):
     result = ' '.join(str(value).split()).strip()
     return result if result else None
 
-VALID_TEST_TYPES = {'pcr', 'rapid test', 'other'}
+TEST_TYPE_OPTIONS = {
+    'First PCR': 'INFANT_TESTING_PCR_1ST_PCR_4-6_WEEKS_OF_AGE_OR_1ST_CONTACT',
+    'Second PCR': 'INFANT_TESTING_PCR_2ND_PCR_12_WEEKS_AFTER_CESSATION_OF_BREASTFEEDING_OR_AS_INDICATED'
+}
+TEST_TYPE_VALUES = set(TEST_TYPE_OPTIONS.values())
+
+AGE_AT_TEST_OPTIONS = {
+    'Less than 72hours': 'CHILD_TEST_AGE_<_72_HRS',
+    'Less than 2 months': '2ND_PCR_CHILD_TEST_AGE_<_2_MONTHS',
+    '2 -12 months': '2ND_PCR_CHILD_TEST_AGE_2-12_MONTHS',
+    'Greater than 12 months': '2ND_PCR_CHILD_TEST_AGE_>_12_MONTHS'
+}
+AGE_AT_TEST_VALUES = set(AGE_AT_TEST_OPTIONS.values())
+
 VALID_RESULTS = {'positive', 'negative', 'indeterminate', 'pending'}
 
 def validate_test_type(value):
@@ -78,9 +91,12 @@ def validate_test_type(value):
     normalized = normalize_string(value)
     if not normalized:
         return None, "Empty test_type"
-    if normalized.lower() in VALID_TEST_TYPES:
-        return normalized.title() if normalized.lower() != 'pcr' else 'PCR', None
-    return None, f"Invalid test_type '{normalized}' (allowed: PCR, Rapid Test, Other)"
+    if normalized in TEST_TYPE_VALUES:
+        return normalized, None
+    for label, val in TEST_TYPE_OPTIONS.items():
+        if normalized.lower() == label.lower():
+            return val, None
+    return None, f"Invalid test_type '{normalized}' (allowed: First PCR, Second PCR)"
 
 def validate_results(value):
     if not value:
@@ -91,6 +107,19 @@ def validate_results(value):
     if normalized.lower() in VALID_RESULTS:
         return normalized.title(), None
     return None, f"Invalid results '{normalized}' (allowed: Positive, Negative, Indeterminate, Pending)"
+
+def validate_age_at_test(value):
+    if not value:
+        return None, "Missing age_at_test"
+    normalized = normalize_string(value)
+    if not normalized:
+        return None, "Empty age_at_test"
+    if normalized in AGE_AT_TEST_VALUES:
+        return normalized, None
+    for label, val in AGE_AT_TEST_OPTIONS.items():
+        if normalized.lower() == label.lower():
+            return val, None
+    return None, f"Invalid age_at_test '{normalized}' (allowed: Less than 72hours, Less than 2 months, 2 -12 months, Greater than 12 months)"
 
 tab1, tab2, tab3 = st.tabs([
     "📋 Client Verification Import",
@@ -251,9 +280,10 @@ with tab3:
                     "ANC Number",
                     placeholder="Enter ANC number"
                 )
-                age_at_test = st.text_input(
-                    "Age at Test",
-                    placeholder="e.g., 6 weeks, 3 months"
+                age_at_test_label = st.selectbox(
+                    "Age at Test *",
+                    options=[""] + list(AGE_AT_TEST_OPTIONS.keys()),
+                    index=0
                 )
             
             with col2:
@@ -261,9 +291,9 @@ with tab3:
                     "Visit Date *",
                     value=date.today()
                 )
-                test_type = st.selectbox(
+                test_type_label = st.selectbox(
                     "Test Type *",
-                    options=["", "PCR", "Rapid Test", "Other"],
+                    options=[""] + list(TEST_TYPE_OPTIONS.keys()),
                     index=0
                 )
                 results = st.selectbox(
@@ -309,17 +339,22 @@ with tab3:
             if submitted and db_configured:
                 if not infant_hospital_number:
                     st.error("❌ Infant Hospital Number is required")
-                elif not test_type:
+                elif not test_type_label:
                     st.error("❌ Test Type is required")
+                elif not age_at_test_label:
+                    st.error("❌ Age at Test is required")
                 elif not results:
                     st.error("❌ Results is required")
                 else:
+                    test_type_value = TEST_TYPE_OPTIONS.get(test_type_label)
+                    age_at_test_value = AGE_AT_TEST_OPTIONS.get(age_at_test_label)
+                    
                     record_data = {
                         'visit_date': visit_date,
                         'infant_hospital_number': infant_hospital_number,
                         'anc_number': anc_number or None,
-                        'age_at_test': age_at_test or None,
-                        'test_type': test_type,
+                        'age_at_test': age_at_test_value,
+                        'test_type': test_type_value,
                         'date_sample_collected': parse_date_value(date_sample_collected_str),
                         'date_sample_sent': parse_date_value(date_sample_sent_str),
                         'date_result_received_at_facility': parse_date_value(date_result_received_facility_str),
@@ -344,11 +379,12 @@ with tab3:
         **Required columns in Excel file:**
         - `infant_hospital_number` (required)
         - `visit_date` (required, format: YYYY-MM-DD)
-        - `test_type` (required)
+        - `test_type` (required: First PCR or Second PCR)
+        - `age_at_test` (required: Less than 72hours, Less than 2 months, 2 -12 months, Greater than 12 months)
         - `results` (required)
         
         **Optional columns:**
-        - `anc_number`, `age_at_test`, `date_sample_collected`, `date_sample_sent`
+        - `anc_number`, `date_sample_collected`, `date_sample_sent`
         - `date_result_received_at_facility`, `date_result_received_by_caregiver`, `unique_uuid`
         """)
         
@@ -371,7 +407,7 @@ with tab3:
                 st.success(f"✓ File uploaded: {pmtct_file.name}")
                 st.metric("Records Found", result['row_count'])
                 
-                required_cols = ['infant_hospital_number', 'visit_date', 'test_type', 'results']
+                required_cols = ['infant_hospital_number', 'visit_date', 'test_type', 'age_at_test', 'results']
                 missing_cols = [col for col in required_cols if col not in df.columns]
                 
                 if missing_cols:
@@ -392,12 +428,15 @@ with tab3:
                                 visit_dt = parse_date_value(row.get('visit_date'))
                                 
                                 test_t, test_err = validate_test_type(row.get('test_type'))
+                                age_val, age_err = validate_age_at_test(row.get('age_at_test'))
                                 result_val, result_err = validate_results(row.get('results'))
                                 
                                 if not hospital_num:
                                     row_errors.append("Missing infant_hospital_number")
                                 if test_err:
                                     row_errors.append(test_err)
+                                if age_err:
+                                    row_errors.append(age_err)
                                 if result_err:
                                     row_errors.append(result_err)
                                 if not visit_dt:
@@ -411,7 +450,7 @@ with tab3:
                                     'visit_date': visit_dt,
                                     'infant_hospital_number': hospital_num,
                                     'anc_number': normalize_string(row.get('anc_number')),
-                                    'age_at_test': normalize_string(row.get('age_at_test')),
+                                    'age_at_test': age_val,
                                     'test_type': test_t,
                                     'date_sample_collected': parse_date_value(row.get('date_sample_collected')),
                                     'date_sample_sent': parse_date_value(row.get('date_sample_sent')),
