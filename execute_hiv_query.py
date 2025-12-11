@@ -1,6 +1,6 @@
 import sys
 import os
-from hiv_service import read_uuids_from_excel, execute_hiv_query, validate_db_credentials
+from services import read_uuids_from_excel, execute_verification_query, validate_db_credentials
 
 def main():
     excel_file = 'person_uuids.xlsx'
@@ -36,20 +36,21 @@ def main():
     
     print(f"Found {result['count']} unique UUIDs in Excel file")
     print(f"\nUUIDs to process:")
-    for idx, uuid in enumerate(uuids, 1):
+    for idx, uuid in enumerate(uuids[:10], 1):
         print(f"  {idx}. {uuid}")
+    if len(uuids) > 10:
+        print(f"  ... and {len(uuids) - 10} more")
     
     response = input(f"\nProceed with database operation for {len(uuids)} UUIDs? (yes/no): ")
     if response.lower() not in ['yes', 'y']:
         print("Operation cancelled.")
         return
     
-    print("\n--- Executing INSERT query ---")
-    exec_result = execute_hiv_query(uuids)
+    print("\n--- Executing verification import ---")
+    exec_result = execute_verification_query(uuids)
     
     if exec_result['success']:
         print(f"Inserted {exec_result['insert_count']} records into hiv_observation")
-        print(f"\n--- Executing UPDATE query ---")
         print(f"Updated {exec_result['update_count']} records in hiv_status_tracker")
         print("\n✓ Transaction committed successfully")
         print("\n✓ All operations completed successfully!")

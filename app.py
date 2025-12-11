@@ -1,18 +1,23 @@
 import streamlit as st
 import tempfile
 import os
-from hiv_service import read_uuids_from_excel, execute_hiv_query, validate_db_credentials
+from datetime import date
+from services import (
+    validate_db_credentials,
+    read_uuids_from_excel,
+    execute_verification_query,
+    execute_lab_sync,
+    insert_pmtct_record
+)
 
 st.set_page_config(
-    page_title="HIV Observation Data Import",
+    page_title="LAMISPLUS Data Tools",
     page_icon="🏥",
     layout="wide"
 )
 
-st.title("🏥 HIV Observation Data Import")
-st.markdown("Import client verification records into the LAMISPLUS database")
-
-st.markdown("---")
+st.title("🏥 LAMISPLUS Data Tools")
+st.markdown("Multi-purpose data import and sync utilities for LAMISPLUS database")
 
 credential_check = validate_db_credentials()
 db_configured = credential_check['success']
@@ -21,9 +26,9 @@ if db_configured:
     st.success("✓ Database credentials configured")
 else:
     st.warning("⚠️ Preview Mode - Database not configured")
-    with st.expander("Setup Instructions (click to expand)", expanded=False):
+    with st.expander("Setup Instructions", expanded=False):
         st.markdown("""
-        To connect to your database, create a `.env` file with:
+        Create a `.env` file with:
         ```
         DB_HOST=your_host
         DB_PORT=5432
@@ -36,130 +41,227 @@ else:
 
 st.markdown("---")
 
-st.subheader("📂 Step 1: Upload Excel File")
-st.markdown("Upload an Excel file containing a **`person_uuid`** column with the UUIDs to process.")
+tab1, tab2, tab3 = st.tabs([
+    "📋 Client Verification Import",
+    "🔬 Lab Result Sync", 
+    "👶 PMTCT Infant PCR"
+])
 
-uploaded_file = st.file_uploader(
-    "Choose an Excel file (.xlsx)",
-    type=['xlsx'],
-    help="The file must contain a column named 'person_uuid'"
-)
-
-if uploaded_file is not None:
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
-        tmp_file_path = tmp_file.name
+with tab1:
+    st.subheader("Client Verification Status Import")
+    st.markdown("Import client verification records into the `hiv_observation` table and fix date errors in `hiv_status_tracker`.")
     
-    st.success(f"✓ File uploaded: {uploaded_file.name}")
+    uploaded_file = st.file_uploader(
+        "Upload Excel file with person_uuid column",
+        type=['xlsx'],
+        key="verification_upload",
+        help="The file must contain a column named 'person_uuid'"
+    )
     
-    with st.spinner("Reading Excel file..."):
+    if uploaded_file is not None:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            tmp_file_path = tmp_file.name
+        
+        st.success(f"✓ File uploaded: {uploaded_file.name}")
+        
         result = read_uuids_from_excel(tmp_file_path)
-    
-    os.unlink(tmp_file_path)
-    
-    if result['success']:
-        st.markdown("---")
-        st.subheader("📋 Step 2: Review UUIDs")
+        os.unlink(tmp_file_path)
         
-        col1, col2 = st.columns([1, 3])
-        with col1:
-            st.metric("Total UUIDs Found", result['count'])
-        
-        with col2:
-            with st.expander("View all UUIDs", expanded=False):
-                for idx, uuid in enumerate(result['uuids'], 1):
-                    st.code(f"{idx}. {uuid}", language=None)
-        
-        st.markdown("---")
-        st.subheader("🚀 Step 3: Execute Database Operations")
-        
-        st.info("""
-        **This will perform the following operations:**
-        - ✓ Insert client verification records into `hiv_observation` table
-        - ✓ Update incorrect status dates in `hiv_status_tracker` table
-        - ✓ All operations are executed within a transaction (automatic rollback on errors)
-        """)
-        
-        col1, col2, col3 = st.columns([1, 1, 2])
-        
-        with col1:
-            if db_configured:
-                execute_button = st.button(
-                    "Execute Query",
-                    type="primary",
-                    use_container_width=True,
-                    disabled=result['count'] == 0
-                )
-            else:
-                st.button(
-                    "Execute Query",
-                    type="primary",
-                    use_container_width=True,
-                    disabled=True
-                )
-                st.caption("⚠️ Configure database to enable")
-                execute_button = False
-        
-        if execute_button:
-            with st.spinner("Executing database operations..."):
-                exec_result = execute_hiv_query(result['uuids'])
+        if result['success']:
+            st.metric("UUIDs Found", result['count'])
             
-            st.markdown("---")
-            st.subheader("📊 Results")
+            with st.expander("View UUIDs", expanded=False):
+                for idx, uuid in enumerate(result['uuids'][:50], 1):
+                    st.code(f"{idx}. {uuid}", language=None)
+                if result['count'] > 50:
+                    st.info(f"... and {result['count'] - 50} more")
+            
+            st.info("""
+            **Operations:**
+            - Insert verification records into `hiv_observation`
+            - Fix dates in `hiv_status_tracker` (0209 → 2009)
+            """)
+            
+            if db_configured:
+                if st.button("Execute Verification Import", type="primary", key="verify_btn"):
+                    with st.spinner("Executing..."):
+                        exec_result = execute_verification_query(result['uuids'])
+                    
+                    if exec_result['success']:
+                        st.success("✅ Completed successfully!")
+                        col1, col2 = st.columns(2)
+                        col1.metric("Records Inserted", exec_result['insert_count'])
+                        col2.metric("Dates Fixed", exec_result['update_count'])
+                        st.balloons()
+                    else:
+                        st.error(f"❌ Failed: {exec_result['error']}")
+            else:
+                st.button("Execute Verification Import", type="primary", disabled=True, key="verify_btn_disabled")
+                st.caption("⚠️ Configure database to enable")
+        else:
+            st.error(f"❌ {result['error']}")
+            if result.get('available_columns'):
+                st.warning(f"Available columns: {', '.join(result['available_columns'])}")
+
+with tab2:
+    st.subheader("Lab Result Sync")
+    st.markdown("Sync test results from `lims_result` to `laboratory_result` table.")
+    
+    st.info("""
+    **What this does:**
+    - Finds records where `test_result` differs from `result_reported`
+    - Updates `laboratory_result.result_reported` with the correct `test_result` value
+    - Only processes numeric results (matching pattern `\\d+\\.\\d+`)
+    """)
+    
+    st.code("""
+    UPDATE laboratory_result r 
+    SET result_reported = test_result 
+    FROM (
+        SELECT test_result, result_reported, lr.uuid 
+        FROM lims_result lmr 
+        INNER JOIN laboratory_result lr ON lr.test_id = lmr.test_id 
+        WHERE test_result ~ '\\d+\\.\\d+' AND test_result <> result_reported
+    ) s
+    WHERE r.uuid = s.uuid
+    """, language="sql")
+    
+    if db_configured:
+        if st.button("🔄 Run Lab Result Sync", type="primary", key="lab_sync_btn"):
+            with st.spinner("Syncing lab results..."):
+                exec_result = execute_lab_sync()
             
             if exec_result['success']:
-                st.success("✅ Transaction completed successfully!")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric(
-                        "Records Inserted",
-                        exec_result['insert_count'],
-                        delta=None,
-                        help="Number of verification records inserted into hiv_observation"
-                    )
-                with col2:
-                    st.metric(
-                        "Records Updated",
-                        exec_result['update_count'],
-                        delta=None,
-                        help="Number of status dates corrected in hiv_status_tracker"
-                    )
-                
-                st.balloons()
+                st.success("✅ Lab sync completed successfully!")
+                st.metric("Records Updated", exec_result['update_count'])
+                if exec_result['update_count'] > 0:
+                    st.balloons()
             else:
-                st.error("❌ Operation Failed")
-                st.error(exec_result['error'])
-                if exec_result.get('rolled_back'):
-                    st.warning("⚠️ Transaction was rolled back. No changes were made to the database.")
+                st.error(f"❌ Failed: {exec_result['error']}")
     else:
-        st.error("❌ Error Reading Excel File")
-        st.error(result['error'])
-        if result.get('available_columns'):
-            st.warning(f"Available columns in the file: {', '.join(result['available_columns'])}")
-            st.info("Please ensure your Excel file has a column named **`person_uuid`**")
+        st.button("🔄 Run Lab Result Sync", type="primary", disabled=True, key="lab_sync_btn_disabled")
+        st.caption("⚠️ Configure database to enable")
 
-else:
-    st.info("👆 Please upload an Excel file to begin")
+with tab3:
+    st.subheader("PMTCT Infant PCR Data Entry")
+    st.markdown("Insert infant PCR records into the `pmtct_infant_pcr` table.")
+    
+    with st.form("pmtct_form"):
+        st.markdown("### Patient Information")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            infant_hospital_number = st.text_input(
+                "Infant Hospital Number *",
+                placeholder="Enter hospital number"
+            )
+            anc_number = st.text_input(
+                "ANC Number",
+                placeholder="Enter ANC number"
+            )
+            age_at_test = st.text_input(
+                "Age at Test",
+                placeholder="e.g., 6 weeks, 3 months"
+            )
+        
+        with col2:
+            visit_date = st.date_input(
+                "Visit Date *",
+                value=date.today()
+            )
+            test_type = st.selectbox(
+                "Test Type *",
+                options=["", "PCR", "Rapid Test", "Other"],
+                index=0
+            )
+            results = st.selectbox(
+                "Results *",
+                options=["", "Positive", "Negative", "Indeterminate", "Pending"],
+                index=0
+            )
+        
+        st.markdown("### Sample Dates")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            date_sample_collected = st.date_input(
+                "Date Sample Collected",
+                value=None
+            )
+            date_sample_sent = st.date_input(
+                "Date Sample Sent",
+                value=None
+            )
+        
+        with col2:
+            date_result_received_at_facility = st.date_input(
+                "Date Result Received at Facility",
+                value=None
+            )
+            date_result_received_by_caregiver = st.date_input(
+                "Date Result Received by Caregiver",
+                value=None
+            )
+        
+        st.markdown("### Identifiers")
+        unique_uuid = st.text_input(
+            "Unique UUID (optional)",
+            placeholder="Leave blank to auto-generate"
+        )
+        
+        submitted = st.form_submit_button("💾 Save PMTCT Record", type="primary")
+        
+        if submitted:
+            if not infant_hospital_number:
+                st.error("❌ Infant Hospital Number is required")
+            elif not test_type:
+                st.error("❌ Test Type is required")
+            elif not results:
+                st.error("❌ Results is required")
+            elif not db_configured:
+                st.error("❌ Database not configured")
+            else:
+                record_data = {
+                    'visit_date': visit_date,
+                    'infant_hospital_number': infant_hospital_number,
+                    'anc_number': anc_number or None,
+                    'age_at_test': age_at_test or None,
+                    'test_type': test_type,
+                    'date_sample_collected': date_sample_collected,
+                    'date_sample_sent': date_sample_sent,
+                    'date_result_received_at_facility': date_result_received_at_facility,
+                    'date_result_received_by_caregiver': date_result_received_by_caregiver,
+                    'results': results,
+                    'unique_uuid': unique_uuid or None
+                }
+                
+                with st.spinner("Saving record..."):
+                    exec_result = insert_pmtct_record(record_data)
+                
+                if exec_result['success']:
+                    st.success(f"✅ Record saved successfully!")
+                    st.info(f"Generated UUID: `{exec_result['uuid']}`")
+                    st.balloons()
+                else:
+                    st.error(f"❌ Failed: {exec_result['error']}")
+    
+    st.markdown("---")
+    st.markdown("### Bulk Import from Excel")
+    
+    pmtct_file = st.file_uploader(
+        "Upload Excel file with PMTCT data",
+        type=['xlsx'],
+        key="pmtct_upload",
+        help="Excel file should have columns matching the form fields above"
+    )
+    
+    if pmtct_file is not None:
+        st.info("📋 Bulk import feature: Upload an Excel file with columns matching the form fields to import multiple records at once.")
+        st.warning("⚠️ Bulk import requires columns: infant_hospital_number, visit_date, test_type, results (at minimum)")
 
 st.markdown("---")
 st.markdown("### 💡 Tips")
-with st.expander("File Format Requirements"):
-    st.markdown("""
-    Your Excel file should have the following structure:
-    
-    | person_uuid |
-    |-------------|
-    | 080e68d8-7be2-6141-8959-9f6951704ad0 |
-    | 0f4a1c07-dd74-4d08-bba6-32595f11d354 |
-    | 1063fa10-82fe-4e1b-8890-244da2fee1b9 |
-    
-    - Column name must be exactly **`person_uuid`**
-    - UUIDs should be in standard UUID format
-    - Empty rows will be automatically skipped
-    - Duplicate UUIDs will be processed only once
-    """)
-
 with st.expander("Database Requirements"):
     st.markdown("""
     **Required PostgreSQL Extension:**
@@ -167,8 +269,11 @@ with st.expander("Database Requirements"):
     CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
     ```
     
-    **Required Tables:**
-    - `patient_person`
-    - `hiv_observation`
-    - `hiv_status_tracker`
+    **Tables used by this application:**
+    - `patient_person` - Client verification
+    - `hiv_observation` - Client verification
+    - `hiv_status_tracker` - Client verification
+    - `lims_result` - Lab result sync
+    - `laboratory_result` - Lab result sync
+    - `pmtct_infant_pcr` - PMTCT data entry
     """)
