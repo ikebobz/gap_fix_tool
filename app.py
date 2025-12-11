@@ -94,7 +94,7 @@ def validate_results(value):
 
 tab1, tab2, tab3 = st.tabs([
     "📋 Client Verification Import",
-    "🔬 Lab Result Sync", 
+    "🔬 Fix Lab Result Round Off Error", 
     "👶 PMTCT Infant PCR"
 ])
 
