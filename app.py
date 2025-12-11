@@ -1,14 +1,18 @@
 import streamlit as st
 import tempfile
 import os
-from datetime import date
+import pandas as pd
+from datetime import date, datetime
 from services import (
     validate_db_credentials,
     read_uuids_from_excel,
+    read_excel_file,
     execute_verification_query,
     execute_lab_sync,
-    insert_pmtct_record
+    insert_pmtct_record,
+    insert_pmtct_batch
 )
+from services.lab_results import execute_lab_sync_filtered
 
 st.set_page_config(
     page_title="LAMISPLUS Data Tools",
@@ -40,6 +44,53 @@ else:
         """)
 
 st.markdown("---")
+
+def parse_date_value(value):
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, (date, datetime)):
+        return value.date() if isinstance(value, datetime) else value
+    if isinstance(value, (int, float)) and not pd.isna(value):
+        try:
+            return datetime.fromordinal(datetime(1900, 1, 1).toordinal() + int(value) - 2).date()
+        except:
+            pass
+    try:
+        parsed = pd.to_datetime(value, errors='coerce')
+        if pd.notna(parsed):
+            return parsed.date()
+    except:
+        pass
+    return None
+
+def normalize_string(value):
+    if value is None or pd.isna(value):
+        return None
+    result = ' '.join(str(value).split()).strip()
+    return result if result else None
+
+VALID_TEST_TYPES = {'pcr', 'rapid test', 'other'}
+VALID_RESULTS = {'positive', 'negative', 'indeterminate', 'pending'}
+
+def validate_test_type(value):
+    if not value:
+        return None, "Missing test_type"
+    normalized = normalize_string(value)
+    if not normalized:
+        return None, "Empty test_type"
+    if normalized.lower() in VALID_TEST_TYPES:
+        return normalized.title() if normalized.lower() != 'pcr' else 'PCR', None
+    return None, f"Invalid test_type '{normalized}' (allowed: PCR, Rapid Test, Other)"
+
+def validate_results(value):
+    if not value:
+        return None, "Missing results"
+    normalized = normalize_string(value)
+    if not normalized:
+        return None, "Empty results"
+    if normalized.lower() in VALID_RESULTS:
+        return normalized.title(), None
+    return None, f"Invalid results '{normalized}' (allowed: Positive, Negative, Indeterminate, Pending)"
 
 tab1, tab2, tab3 = st.tabs([
     "📋 Client Verification Import",
@@ -103,6 +154,8 @@ with tab1:
             st.error(f"❌ {result['error']}")
             if result.get('available_columns'):
                 st.warning(f"Available columns: {', '.join(result['available_columns'])}")
+    else:
+        st.info("👆 Upload an Excel file to begin")
 
 with tab2:
     st.subheader("Lab Result Sync")
@@ -115,22 +168,53 @@ with tab2:
     - Only processes numeric results (matching pattern `\\d+\\.\\d+`)
     """)
     
-    st.code("""
-    UPDATE laboratory_result r 
-    SET result_reported = test_result 
-    FROM (
-        SELECT test_result, result_reported, lr.uuid 
-        FROM lims_result lmr 
-        INNER JOIN laboratory_result lr ON lr.test_id = lmr.test_id 
-        WHERE test_result ~ '\\d+\\.\\d+' AND test_result <> result_reported
-    ) s
-    WHERE r.uuid = s.uuid
-    """, language="sql")
+    with st.expander("View SQL Query", expanded=False):
+        st.code("""
+WITH s AS (
+    SELECT test_result, result_reported, lr.uuid 
+    FROM lims_result lmr 
+    INNER JOIN laboratory_result lr ON lr.test_id = lmr.test_id 
+    WHERE test_result ~ '\\d+\\.\\d+' AND test_result <> result_reported
+)
+UPDATE laboratory_result r 
+SET result_reported = test_result 
+FROM s
+WHERE r.uuid = s.uuid
+        """, language="sql")
+    
+    lab_file = st.file_uploader(
+        "Upload Excel file with UUIDs to filter (optional)",
+        type=['xlsx'],
+        key="lab_upload",
+        help="Optional: Limit sync to specific UUIDs. Leave empty to sync all mismatched results."
+    )
+    
+    lab_uuids = None
+    if lab_file is not None:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+            tmp_file.write(lab_file.getvalue())
+            tmp_file_path = tmp_file.name
+        
+        result = read_uuids_from_excel(tmp_file_path, column_name='uuid')
+        if not result['success']:
+            result = read_uuids_from_excel(tmp_file_path, column_name='person_uuid')
+        os.unlink(tmp_file_path)
+        
+        if result['success']:
+            lab_uuids = result['uuids']
+            st.success(f"✓ File uploaded: {lab_file.name}")
+            st.metric("UUIDs to filter", result['count'])
+        else:
+            st.warning(f"Could not read UUIDs: {result['error']}")
+            st.info("Proceeding without UUID filter - will sync all mismatched results")
     
     if db_configured:
         if st.button("🔄 Run Lab Result Sync", type="primary", key="lab_sync_btn"):
             with st.spinner("Syncing lab results..."):
-                exec_result = execute_lab_sync()
+                if lab_uuids:
+                    exec_result = execute_lab_sync_filtered(lab_uuids)
+                else:
+                    exec_result = execute_lab_sync()
             
             if exec_result['success']:
                 st.success("✅ Lab sync completed successfully!")
@@ -147,118 +231,223 @@ with tab3:
     st.subheader("PMTCT Infant PCR Data Entry")
     st.markdown("Insert infant PCR records into the `pmtct_infant_pcr` table.")
     
-    with st.form("pmtct_form"):
-        st.markdown("### Patient Information")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            infant_hospital_number = st.text_input(
-                "Infant Hospital Number *",
-                placeholder="Enter hospital number"
-            )
-            anc_number = st.text_input(
-                "ANC Number",
-                placeholder="Enter ANC number"
-            )
-            age_at_test = st.text_input(
-                "Age at Test",
-                placeholder="e.g., 6 weeks, 3 months"
-            )
-        
-        with col2:
-            visit_date = st.date_input(
-                "Visit Date *",
-                value=date.today()
-            )
-            test_type = st.selectbox(
-                "Test Type *",
-                options=["", "PCR", "Rapid Test", "Other"],
-                index=0
-            )
-            results = st.selectbox(
-                "Results *",
-                options=["", "Positive", "Negative", "Indeterminate", "Pending"],
-                index=0
-            )
-        
-        st.markdown("### Sample Dates")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            date_sample_collected = st.date_input(
-                "Date Sample Collected",
-                value=None
-            )
-            date_sample_sent = st.date_input(
-                "Date Sample Sent",
-                value=None
-            )
-        
-        with col2:
-            date_result_received_at_facility = st.date_input(
-                "Date Result Received at Facility",
-                value=None
-            )
-            date_result_received_by_caregiver = st.date_input(
-                "Date Result Received by Caregiver",
-                value=None
-            )
-        
-        st.markdown("### Identifiers")
-        unique_uuid = st.text_input(
-            "Unique UUID (optional)",
-            placeholder="Leave blank to auto-generate"
-        )
-        
-        submitted = st.form_submit_button("💾 Save PMTCT Record", type="primary")
-        
-        if submitted:
-            if not infant_hospital_number:
-                st.error("❌ Infant Hospital Number is required")
-            elif not test_type:
-                st.error("❌ Test Type is required")
-            elif not results:
-                st.error("❌ Results is required")
-            elif not db_configured:
-                st.error("❌ Database not configured")
-            else:
-                record_data = {
-                    'visit_date': visit_date,
-                    'infant_hospital_number': infant_hospital_number,
-                    'anc_number': anc_number or None,
-                    'age_at_test': age_at_test or None,
-                    'test_type': test_type,
-                    'date_sample_collected': date_sample_collected,
-                    'date_sample_sent': date_sample_sent,
-                    'date_result_received_at_facility': date_result_received_at_facility,
-                    'date_result_received_by_caregiver': date_result_received_by_caregiver,
-                    'results': results,
-                    'unique_uuid': unique_uuid or None
-                }
-                
-                with st.spinner("Saving record..."):
-                    exec_result = insert_pmtct_record(record_data)
-                
-                if exec_result['success']:
-                    st.success(f"✅ Record saved successfully!")
-                    st.info(f"Generated UUID: `{exec_result['uuid']}`")
-                    st.balloons()
-                else:
-                    st.error(f"❌ Failed: {exec_result['error']}")
-    
-    st.markdown("---")
-    st.markdown("### Bulk Import from Excel")
-    
-    pmtct_file = st.file_uploader(
-        "Upload Excel file with PMTCT data",
-        type=['xlsx'],
-        key="pmtct_upload",
-        help="Excel file should have columns matching the form fields above"
+    pmtct_mode = st.radio(
+        "Entry Mode",
+        ["📝 Single Record Form", "📊 Bulk Import from Excel"],
+        horizontal=True
     )
     
-    if pmtct_file is not None:
-        st.info("📋 Bulk import feature: Upload an Excel file with columns matching the form fields to import multiple records at once.")
-        st.warning("⚠️ Bulk import requires columns: infant_hospital_number, visit_date, test_type, results (at minimum)")
+    if pmtct_mode == "📝 Single Record Form":
+        with st.form("pmtct_form"):
+            st.markdown("### Patient Information")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                infant_hospital_number = st.text_input(
+                    "Infant Hospital Number *",
+                    placeholder="Enter hospital number"
+                )
+                anc_number = st.text_input(
+                    "ANC Number",
+                    placeholder="Enter ANC number"
+                )
+                age_at_test = st.text_input(
+                    "Age at Test",
+                    placeholder="e.g., 6 weeks, 3 months"
+                )
+            
+            with col2:
+                visit_date = st.date_input(
+                    "Visit Date *",
+                    value=date.today()
+                )
+                test_type = st.selectbox(
+                    "Test Type *",
+                    options=["", "PCR", "Rapid Test", "Other"],
+                    index=0
+                )
+                results = st.selectbox(
+                    "Results *",
+                    options=["", "Positive", "Negative", "Indeterminate", "Pending"],
+                    index=0
+                )
+            
+            st.markdown("### Sample Dates")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                date_sample_collected_str = st.text_input(
+                    "Date Sample Collected (YYYY-MM-DD)",
+                    placeholder="Leave blank if not applicable"
+                )
+                date_sample_sent_str = st.text_input(
+                    "Date Sample Sent (YYYY-MM-DD)",
+                    placeholder="Leave blank if not applicable"
+                )
+            
+            with col2:
+                date_result_received_facility_str = st.text_input(
+                    "Date Result Received at Facility (YYYY-MM-DD)",
+                    placeholder="Leave blank if not applicable"
+                )
+                date_result_received_caregiver_str = st.text_input(
+                    "Date Result Received by Caregiver (YYYY-MM-DD)",
+                    placeholder="Leave blank if not applicable"
+                )
+            
+            st.markdown("### Identifiers")
+            unique_uuid = st.text_input(
+                "Unique UUID (optional)",
+                placeholder="Leave blank to auto-generate"
+            )
+            
+            submitted = st.form_submit_button("💾 Save PMTCT Record", type="primary", disabled=not db_configured)
+            
+            if not db_configured:
+                st.caption("⚠️ Configure database to enable")
+            
+            if submitted and db_configured:
+                if not infant_hospital_number:
+                    st.error("❌ Infant Hospital Number is required")
+                elif not test_type:
+                    st.error("❌ Test Type is required")
+                elif not results:
+                    st.error("❌ Results is required")
+                else:
+                    record_data = {
+                        'visit_date': visit_date,
+                        'infant_hospital_number': infant_hospital_number,
+                        'anc_number': anc_number or None,
+                        'age_at_test': age_at_test or None,
+                        'test_type': test_type,
+                        'date_sample_collected': parse_date_value(date_sample_collected_str),
+                        'date_sample_sent': parse_date_value(date_sample_sent_str),
+                        'date_result_received_at_facility': parse_date_value(date_result_received_facility_str),
+                        'date_result_received_by_caregiver': parse_date_value(date_result_received_caregiver_str),
+                        'results': results,
+                        'unique_uuid': unique_uuid or None
+                    }
+                    
+                    with st.spinner("Saving record..."):
+                        exec_result = insert_pmtct_record(record_data)
+                    
+                    if exec_result['success']:
+                        st.success(f"✅ Record saved successfully!")
+                        st.info(f"Generated UUID: `{exec_result['uuid']}`")
+                        st.balloons()
+                    else:
+                        st.error(f"❌ Failed: {exec_result['error']}")
+    
+    else:
+        st.markdown("### Bulk Import from Excel")
+        st.info("""
+        **Required columns in Excel file:**
+        - `infant_hospital_number` (required)
+        - `visit_date` (required, format: YYYY-MM-DD)
+        - `test_type` (required)
+        - `results` (required)
+        
+        **Optional columns:**
+        - `anc_number`, `age_at_test`, `date_sample_collected`, `date_sample_sent`
+        - `date_result_received_at_facility`, `date_result_received_by_caregiver`, `unique_uuid`
+        """)
+        
+        pmtct_file = st.file_uploader(
+            "Upload Excel file with PMTCT data",
+            type=['xlsx'],
+            key="pmtct_bulk_upload"
+        )
+        
+        if pmtct_file is not None:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+                tmp_file.write(pmtct_file.getvalue())
+                tmp_file_path = tmp_file.name
+            
+            result = read_excel_file(tmp_file_path)
+            os.unlink(tmp_file_path)
+            
+            if result['success']:
+                df = result['dataframe']
+                st.success(f"✓ File uploaded: {pmtct_file.name}")
+                st.metric("Records Found", result['row_count'])
+                
+                required_cols = ['infant_hospital_number', 'visit_date', 'test_type', 'results']
+                missing_cols = [col for col in required_cols if col not in df.columns]
+                
+                if missing_cols:
+                    st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
+                    st.info(f"Available columns: {', '.join(result['columns'])}")
+                else:
+                    st.markdown("**Preview (first 5 rows):**")
+                    st.dataframe(df.head(), use_container_width=True)
+                    
+                    if db_configured:
+                        if st.button("📥 Import All Records", type="primary", key="pmtct_bulk_btn"):
+                            records = []
+                            errors = []
+                            
+                            for idx, row in df.iterrows():
+                                row_errors = []
+                                hospital_num = normalize_string(row.get('infant_hospital_number'))
+                                visit_dt = parse_date_value(row.get('visit_date'))
+                                
+                                test_t, test_err = validate_test_type(row.get('test_type'))
+                                result_val, result_err = validate_results(row.get('results'))
+                                
+                                if not hospital_num:
+                                    row_errors.append("Missing infant_hospital_number")
+                                if test_err:
+                                    row_errors.append(test_err)
+                                if result_err:
+                                    row_errors.append(result_err)
+                                if not visit_dt:
+                                    row_errors.append("Invalid or missing visit_date")
+                                
+                                if row_errors:
+                                    errors.append(f"Row {idx+2}: {'; '.join(row_errors)}")
+                                    continue
+                                
+                                record = {
+                                    'visit_date': visit_dt,
+                                    'infant_hospital_number': hospital_num,
+                                    'anc_number': normalize_string(row.get('anc_number')),
+                                    'age_at_test': normalize_string(row.get('age_at_test')),
+                                    'test_type': test_t,
+                                    'date_sample_collected': parse_date_value(row.get('date_sample_collected')),
+                                    'date_sample_sent': parse_date_value(row.get('date_sample_sent')),
+                                    'date_result_received_at_facility': parse_date_value(row.get('date_result_received_at_facility')),
+                                    'date_result_received_by_caregiver': parse_date_value(row.get('date_result_received_by_caregiver')),
+                                    'results': result_val,
+                                    'unique_uuid': normalize_string(row.get('unique_uuid'))
+                                }
+                                records.append(record)
+                            
+                            if errors:
+                                st.warning(f"⚠️ {len(errors)} rows have validation errors and will be skipped:")
+                                with st.expander("View errors"):
+                                    for err in errors[:20]:
+                                        st.text(err)
+                                    if len(errors) > 20:
+                                        st.text(f"... and {len(errors) - 20} more")
+                            
+                            if records:
+                                with st.spinner(f"Importing {len(records)} valid records..."):
+                                    exec_result = insert_pmtct_batch(records)
+                                
+                                if exec_result['success']:
+                                    st.success(f"✅ Successfully imported {exec_result['insert_count']} records!")
+                                    st.balloons()
+                                else:
+                                    st.error(f"❌ Failed: {exec_result['error']}")
+                            else:
+                                st.error("❌ No valid records to import after validation")
+                    else:
+                        st.button("📥 Import All Records", type="primary", disabled=True, key="pmtct_bulk_btn_disabled")
+                        st.caption("⚠️ Configure database to enable")
+            else:
+                st.error(f"❌ {result['error']}")
+        else:
+            st.info("👆 Upload an Excel file to begin bulk import")
 
 st.markdown("---")
 st.markdown("### 💡 Tips")

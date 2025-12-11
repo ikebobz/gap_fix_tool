@@ -1,85 +1,79 @@
-# HIV Observation Data Import Project
+# LAMISPLUS Data Tools
 
 ## Overview
-This project provides both a web interface and command-line script to batch import HIV client verification records into the LAMISPLUS PostgreSQL database. It reads person UUIDs from Excel files and executes parameterized SQL queries to insert verification data and correct historical date errors.
+A multi-purpose web application for importing and syncing data in the LAMISPLUS PostgreSQL database. Provides both web UI (Streamlit) and command-line interfaces for different data operations.
 
 ## Current State
-The project is complete with both web and CLI interfaces:
-- ✓ Streamlit web UI with drag-and-drop file upload
-- ✓ Command-line interface for automation
-- ✓ Shared service module with secure parameterized queries
-- ✓ Excel file reading with validation
-- ✓ Database connection management with proper resource cleanup
-- ✓ Transaction safety with commit/rollback
-- ✓ User confirmation prompts in both interfaces
-- ✓ Clear error messages and status reporting
+The project is complete with 3 use cases:
+- ✓ Client Verification Import - Upload Excel with UUIDs, insert verification records
+- ✓ Lab Result Sync - Sync test results from lims_result to laboratory_result
+- ✓ PMTCT Infant PCR - Single record form entry or bulk Excel import
 
 ## Recent Changes
-**2025-11-20**: Added Streamlit web interface
-- Refactored core logic into `hiv_service.py` for code reuse
-- Created `app.py` with Streamlit web UI featuring:
-  - File upload with drag-and-drop
-  - UUID preview before execution
-  - Visual confirmation and result display
-  - Database credential validation
-- Updated `execute_hiv_query.py` to use shared service module
-- Configured Streamlit workflow on port 5000
-- Updated documentation with both UI and CLI usage instructions
+**2025-12-11**: Multi-use case application
+- Rebuilt app with tabbed interface for 3 use cases
+- Refactored services into modular structure (db.py, excel.py, verification.py, lab_results.py, pmtct.py)
+- Added Lab Result Sync with optional UUID filtering from Excel
+- Added PMTCT Infant PCR with form entry and bulk import
+- Implemented proper date parsing (multiple formats + Excel serial numbers)
+- Added row-level validation with error reporting for bulk imports
+- Preview mode gating for all action buttons
 
 **2025-11-20**: Initial project setup
-- Created secure parameterized queries using ANY(%s)
-- Implemented proper resource management with finally blocks
-- Added Excel file reading functionality
-- Created sample data file `person_uuids_sample.xlsx`
-- Set up environment variable configuration
-- Added comprehensive documentation
+- Created Streamlit web interface
+- Secure parameterized SQL queries
+- Transaction safety with rollback
 
 ## Project Architecture
 
 ### Files
-- `app.py` - Streamlit web interface with file upload UI
-- `execute_hiv_query.py` - Command-line interface for automation
-- `hiv_service.py` - Shared business logic (Excel reading, database operations)
-- `person_uuids_sample.xlsx` - Sample Excel file with 3 test UUIDs
-- `.env` - Database credentials (not in version control)
-- `.env.example` - Template for database configuration
-- `README.md` - User-facing documentation
-- `.gitignore` - Excludes sensitive files and Python artifacts
+```
+.
+├── app.py                      # Streamlit web interface (3 tabs)
+├── execute_hiv_query.py        # CLI for verification import
+├── hiv_service.py              # Backward compatibility wrapper
+├── services/
+│   ├── __init__.py             # Service exports
+│   ├── db.py                   # Database connection utilities
+│   ├── excel.py                # Excel file reading utilities
+│   ├── verification.py         # Client verification operations
+│   ├── lab_results.py          # Lab result sync operations
+│   └── pmtct.py                # PMTCT infant PCR operations
+├── person_uuids_sample.xlsx    # Sample data file
+├── .env.example                # Database configuration template
+└── README.md                   # User documentation
+```
 
-### Code Architecture
-**Separation of Concerns:**
-- `hiv_service.py`: Core business logic
-  - `read_uuids_from_excel()`: Excel parsing with structured error handling
-  - `execute_hiv_query()`: Parameterized database operations
-  - `validate_db_credentials()`: Configuration validation
-  - `get_db_config()`: Environment variable management
+### Use Cases
 
-- `app.py`: Streamlit web interface
-  - File upload with temporary file handling
-  - UUID preview and confirmation flow
-  - Visual result display with metrics
-  - User-friendly error messages
+**1. Client Verification Import**
+- Upload Excel with `person_uuid` column
+- Inserts verification records into `hiv_observation`
+- Fixes date errors in `hiv_status_tracker` (0209 → 2009)
 
-- `execute_hiv_query.py`: CLI interface
-  - Command-line argument handling
-  - Console-based confirmation prompts
-  - Structured output for automation
+**2. Lab Result Sync**
+- Syncs `test_result` to `result_reported` in `laboratory_result`
+- Only processes numeric results matching `\d+\.\d+`
+- Optional UUID filter from Excel upload
+
+**3. PMTCT Infant PCR**
+- Single record form entry with validation
+- Bulk import from Excel with column mapping
+- Proper date parsing (multiple formats)
+- Row-level validation with error reporting
 
 ### Database Operations
-1. **INSERT**: Creates client verification records in `hiv_observation` table
-   - Uses CTE to filter valid person UUIDs from `patient_person` table
-   - Inserts verification data with fixed facility_id (1759)
-   - Generates new UUIDs for records and visits
-   
-2. **UPDATE**: Corrects status dates in `hiv_status_tracker`
-   - Changes '0209-01-31' to '2009-01-31' (year typo correction)
+All operations use parameterized queries to prevent SQL injection:
+- Verification: `uuid = ANY(%s)`
+- Lab Sync: Full table update or filtered by UUID list
+- PMTCT: Individual INSERT statements with proper type conversion
 
 ### Security Features
-- Parameterized queries using `uuid = ANY(%s)` to prevent SQL injection
+- Parameterized SQL queries throughout
 - Environment-based credential management
 - Transaction rollback on errors
-- Guaranteed resource cleanup with finally blocks
-- No credential exposure in UI or logs
+- Preview mode when database not configured
+- No credential exposure in UI
 
 ### Dependencies
 - streamlit: Web interface framework
@@ -89,30 +83,24 @@ The project is complete with both web and CLI interfaces:
 
 ## Usage Instructions
 
-### Web Interface (Recommended)
-1. Open the Streamlit app (automatically running in webview)
-2. Upload Excel file with `person_uuid` column
-3. Review UUIDs in the preview
-4. Click "Execute Query" to run
-5. View results with insert/update counts
+### Web Interface
+1. Open the Preview panel in Replit
+2. Configure database in `.env` file (or use Preview Mode)
+3. Select appropriate tab for your use case
+4. Upload Excel file and/or fill form
+5. Click action button to execute
 
 ### Command-Line Interface
-1. Configure database credentials in `.env` file
-2. Prepare Excel file with `person_uuid` column
-3. Run: `python execute_hiv_query.py [excel_file_path]`
-4. Confirm operation when prompted
-5. Review console output for results
-
-## User Preferences
-- Prefers browser-based UI for ease of use
-- Needs both web and CLI options (CLI for automation)
+```bash
+python execute_hiv_query.py [excel_file_path]
+```
 
 ## Database Requirements
 - PostgreSQL with LAMISPLUS database
-- Tables: `patient_person`, `hiv_observation`, `hiv_status_tracker`
-- Extension: `uuid-ossp` (for uuid_generate_v4 function)
+- Extension: `uuid-ossp` (for uuid_generate_v4)
+- Tables: `patient_person`, `hiv_observation`, `hiv_status_tracker`, `lims_result`, `laboratory_result`, `pmtct_infant_pcr`
 
-## Future Enhancements
-- Add automated tests for Excel parsing and database operations
-- Implement UUID normalization to handle whitespace
-- Add pagination for large UUID lists in the web interface
+## User Preferences
+- Prefers browser-based UI for ease of use
+- Multi-use case interface with tabs
+- Clear validation and error messages
