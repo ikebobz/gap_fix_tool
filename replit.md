@@ -63,11 +63,10 @@ The project is complete with 4 use cases:
 - Sets `archived = 5` for orphaned `hiv_eac` records
 - Optional UUID filter from Excel upload
 
-**4. PMTCT Infant PCR**
-- Single record form entry with validation
-- Bulk import from Excel with column mapping
-- Proper date parsing (multiple formats)
-- Row-level validation with error reporting
+**4. PMTCT Issues** (Multi-page tab)
+- **Infant PCR Data Entry**: Single record form or bulk Excel import
+- **Update Patient Value**: Update results field for specific patients
+- Proper date parsing and row-level validation
 
 ### Database Operations
 All operations use parameterized queries to prevent SQL injection:
