@@ -12,7 +12,7 @@ from services import (
     insert_pmtct_record,
     insert_pmtct_batch,
     execute_eac_fix,
-    execute_pmtct_value_update
+    execute_testing_setting_update
 )
 from services.lab_results import execute_lab_sync_filtered
 
@@ -340,7 +340,7 @@ AND NOT EXISTS (
 with tab4:
     pmtct_page = st.radio(
         "Select Function",
-        ["📝 Infant PCR Data Entry", "🔄 Update Patient Value"],
+        ["📝 Infant PCR Data Entry", "🔄 Update Testing Setting"],
         horizontal=True,
         key="pmtct_page_selector"
     )
@@ -579,21 +579,27 @@ with tab4:
                 st.info("👆 Upload an Excel file to begin bulk import")
     
     else:
-        st.subheader("Update Patient Value")
-        st.markdown("Update a specific value for a patient in the `pmtct_infant_pcr` table.")
+        st.subheader("Update Testing Setting")
+        st.markdown("Update the testing setting for a patient in the `hts_risk_stratification` table.")
         
         st.info("""
         **What this does:**
-        - Updates the `results` field for a specific patient
-        - Replaces the old value with the new value
+        - Finds the risk stratification record for the given patient
+        - Updates the `testing_setting` field with the new value
         """)
         
         with st.expander("View SQL Query", expanded=False):
             st.code("""
-UPDATE pmtct_infant_pcr 
-SET results = [new_value] 
-WHERE person_uuid = [patient_id] 
-AND results = [old_value]
+WITH x AS (
+    SELECT hrs.testing_setting, hrs.uuid 
+    FROM hts_risk_stratification hrs 
+    INNER JOIN hts_client hc ON hc.risk_stratification_code = hrs.code
+    WHERE hc.person_uuid = [Patient ID]
+)
+UPDATE hts_risk_stratification h 
+SET testing_setting = [New Value]
+FROM x 
+WHERE h.uuid = x.uuid
             """, language="sql")
         
         patient_id = st.text_input(
@@ -602,40 +608,32 @@ AND results = [old_value]
             key="update_patient_id"
         )
         
-        old_value = st.text_input(
-            "Old Value *",
-            placeholder="Current value to replace",
-            key="update_old_value"
-        )
-        
         new_value = st.text_input(
             "New Value *",
-            placeholder="New value to set",
+            placeholder="New testing setting value",
             key="update_new_value"
         )
         
         if db_configured:
-            if st.button("🔄 Update Value", type="primary", key="pmtct_update_btn"):
+            if st.button("🔄 Update Testing Setting", type="primary", key="pmtct_update_btn"):
                 if not patient_id:
                     st.error("❌ Patient ID is required")
-                elif not old_value:
-                    st.error("❌ Old Value is required")
                 elif not new_value:
                     st.error("❌ New Value is required")
                 else:
-                    with st.spinner("Updating value..."):
-                        exec_result = execute_pmtct_value_update(patient_id, old_value, new_value)
+                    with st.spinner("Updating testing setting..."):
+                        exec_result = execute_testing_setting_update(patient_id, new_value)
                     
                     if exec_result['success']:
                         if exec_result['update_count'] > 0:
                             st.success(f"✅ Successfully updated {exec_result['update_count']} record(s)!")
                             st.balloons()
                         else:
-                            st.warning("⚠️ No records matched the criteria (Patient ID + Old Value)")
+                            st.warning("⚠️ No records found for this Patient ID")
                     else:
                         st.error(f"❌ Failed: {exec_result['error']}")
         else:
-            st.button("🔄 Update Value", type="primary", disabled=True, key="pmtct_update_btn_disabled")
+            st.button("🔄 Update Testing Setting", type="primary", disabled=True, key="pmtct_update_btn_disabled")
             st.caption("⚠️ Configure database to enable")
 
 st.markdown("---")

@@ -65,7 +65,7 @@ The project is complete with 4 use cases:
 
 **4. PMTCT Issues** (Multi-page tab)
 - **Infant PCR Data Entry**: Single record form or bulk Excel import
-- **Update Patient Value**: Update results field for specific patients
+- **Update Testing Setting**: Update testing_setting in hts_risk_stratification
 - Proper date parsing and row-level validation
 
 ### Database Operations
