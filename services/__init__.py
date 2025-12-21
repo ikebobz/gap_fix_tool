@@ -5,3 +5,4 @@ from .lab_results import execute_lab_sync, execute_lab_sync_filtered
 from .pmtct import insert_pmtct_record, insert_pmtct_batch
 from .eac import execute_eac_fix
 from .pmtct_update import execute_testing_setting_update
+from .hts import execute_hide_hts_entries, execute_update_test_result

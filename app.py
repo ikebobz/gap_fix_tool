@@ -12,7 +12,9 @@ from services import (
     insert_pmtct_record,
     insert_pmtct_batch,
     execute_eac_fix,
-    execute_testing_setting_update
+    execute_testing_setting_update,
+    execute_hide_hts_entries,
+    execute_update_test_result
 )
 from services.lab_results import execute_lab_sync_filtered
 
@@ -340,7 +342,7 @@ AND NOT EXISTS (
 with tab4:
     pmtct_page = st.radio(
         "Select Function",
-        ["📝 Infant PCR Data Entry", "🔄 Update Testing Setting"],
+        ["📝 Infant PCR Data Entry", "🔄 Update Testing Setting", "🙈 Hide HTS Entries", "🔬 Update Test Result"],
         horizontal=True,
         key="pmtct_page_selector"
     )
@@ -635,6 +637,134 @@ WHERE h.uuid = x.uuid
         else:
             st.button("🔄 Update Testing Setting", type="primary", disabled=True, key="pmtct_update_btn_disabled")
             st.caption("⚠️ Configure database to enable")
+    
+    elif pmtct_page == "🙈 Hide HTS Entries":
+        st.subheader("Hide HTS Entries")
+        st.markdown("Archive HTS client records by setting `archived = 1`.")
+        
+        st.info("""
+        **What this does:**
+        - Reads person_uuid values from uploaded Excel file
+        - Sets `archived = 1` for matching HTS client records
+        """)
+        
+        with st.expander("View SQL Query", expanded=False):
+            st.code("""
+UPDATE hts_client 
+SET archived = 1 
+WHERE person_uuid IN (... values from Excel ...)
+            """, language="sql")
+        
+        hide_hts_file = st.file_uploader(
+            "Upload Excel file with person_uuid column",
+            type=['xlsx'],
+            key="hide_hts_upload",
+            help="Excel file must contain a column named 'person_uuid'"
+        )
+        
+        if hide_hts_file is not None:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+                tmp_file.write(hide_hts_file.getvalue())
+                tmp_file_path = tmp_file.name
+            
+            result = read_uuids_from_excel(tmp_file_path, column_name='person_uuid')
+            os.unlink(tmp_file_path)
+            
+            if result['success']:
+                hts_uuids = result['uuids']
+                st.success(f"✓ File uploaded: {hide_hts_file.name}")
+                st.metric("Person UUIDs Found", result['count'])
+                
+                with st.expander("View UUIDs", expanded=False):
+                    for idx, uuid in enumerate(hts_uuids[:50], 1):
+                        st.code(f"{idx}. {uuid}", language=None)
+                    if result['count'] > 50:
+                        st.info(f"... and {result['count'] - 50} more")
+                
+                if db_configured:
+                    if st.button("🙈 Hide HTS Entries", type="primary", key="hide_hts_btn"):
+                        with st.spinner("Hiding HTS entries..."):
+                            exec_result = execute_hide_hts_entries(hts_uuids)
+                        
+                        if exec_result['success']:
+                            st.success(f"✅ Successfully archived {exec_result['update_count']} record(s)!")
+                            if exec_result['update_count'] > 0:
+                                st.balloons()
+                        else:
+                            st.error(f"❌ Failed: {exec_result['error']}")
+                else:
+                    st.button("🙈 Hide HTS Entries", type="primary", disabled=True, key="hide_hts_btn_disabled")
+                    st.caption("⚠️ Configure database to enable")
+            else:
+                st.error(f"❌ {result['error']}")
+                if result.get('available_columns'):
+                    st.warning(f"Available columns: {', '.join(result['available_columns'])}")
+        else:
+            st.info("👆 Upload an Excel file with person_uuid column to begin")
+    
+    elif pmtct_page == "🔬 Update Test Result":
+        st.subheader("Update Test Result")
+        st.markdown("Update HIV test result to 'Negative' for HTS clients.")
+        
+        st.info("""
+        **What this does:**
+        - Reads person_uuid values from uploaded Excel file
+        - Sets `hiv_test_result = 'Negative'` for matching HTS client records
+        """)
+        
+        with st.expander("View SQL Query", expanded=False):
+            st.code("""
+UPDATE hts_client 
+SET hiv_test_result = 'Negative' 
+WHERE person_uuid IN (... values from Excel ...)
+            """, language="sql")
+        
+        update_result_file = st.file_uploader(
+            "Upload Excel file with person_uuid column",
+            type=['xlsx'],
+            key="update_result_upload",
+            help="Excel file must contain a column named 'person_uuid'"
+        )
+        
+        if update_result_file is not None:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+                tmp_file.write(update_result_file.getvalue())
+                tmp_file_path = tmp_file.name
+            
+            result = read_uuids_from_excel(tmp_file_path, column_name='person_uuid')
+            os.unlink(tmp_file_path)
+            
+            if result['success']:
+                result_uuids = result['uuids']
+                st.success(f"✓ File uploaded: {update_result_file.name}")
+                st.metric("Person UUIDs Found", result['count'])
+                
+                with st.expander("View UUIDs", expanded=False):
+                    for idx, uuid in enumerate(result_uuids[:50], 1):
+                        st.code(f"{idx}. {uuid}", language=None)
+                    if result['count'] > 50:
+                        st.info(f"... and {result['count'] - 50} more")
+                
+                if db_configured:
+                    if st.button("🔬 Update Test Result", type="primary", key="update_result_btn"):
+                        with st.spinner("Updating test results..."):
+                            exec_result = execute_update_test_result(result_uuids)
+                        
+                        if exec_result['success']:
+                            st.success(f"✅ Successfully updated {exec_result['update_count']} record(s)!")
+                            if exec_result['update_count'] > 0:
+                                st.balloons()
+                        else:
+                            st.error(f"❌ Failed: {exec_result['error']}")
+                else:
+                    st.button("🔬 Update Test Result", type="primary", disabled=True, key="update_result_btn_disabled")
+                    st.caption("⚠️ Configure database to enable")
+            else:
+                st.error(f"❌ {result['error']}")
+                if result.get('available_columns'):
+                    st.warning(f"Available columns: {', '.join(result['available_columns'])}")
+        else:
+            st.info("👆 Upload an Excel file with person_uuid column to begin")
 
 st.markdown("---")
 st.markdown("### 💡 Tips")
