@@ -9,7 +9,7 @@ def get_db_config():
     return {
         'host': os.getenv('DB_HOST', 'localhost'),
         'port': os.getenv('DB_PORT', '5432'),
-        'database': os.getenv('DB_NAME', 'LAMISPLUS'),
+        'database': os.getenv('DBASE_NAME', 'LAMISPLUS'),
         'user': os.getenv('DB_USER'),
         'password': os.getenv('DB_PASSWORD')
     }

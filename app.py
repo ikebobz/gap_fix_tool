@@ -19,13 +19,13 @@ from services import (
 from services.lab_results import execute_lab_sync_filtered
 
 st.set_page_config(
-    page_title="LAMISPLUS Data Tools",
+    page_title="LAMISPLUS Gap Resolution Tool",
     page_icon="🏥",
     layout="wide"
 )
 
-st.title("🏥 LAMISPLUS Data Tools")
-st.markdown("Multi-purpose data import and sync utilities for LAMISPLUS database")
+st.title("🏥 LAMISPLUS Gap Resolution Tool")
+st.markdown("Multi-purpose data quality resolution tool for LAMISPLUS")
 
 credential_check = validate_db_credentials()
 db_configured = credential_check['success']
@@ -141,7 +141,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 with tab1:
     st.subheader("Client Verification Status Import")
-    st.markdown("Import client verification records into the `hiv_observation` table and fix date errors in `hiv_status_tracker`.")
+    st.markdown("Set verification status for active clients.")
     
     uploaded_file = st.file_uploader(
         "Upload Excel file with person_uuid column",
@@ -171,12 +171,12 @@ with tab1:
             
             st.info("""
             **Operations:**
-            - Insert verification records into `hiv_observation`
-            - Fix dates in `hiv_status_tracker` (0209 → 2009)
+            - Insert verification status for active clients
+            
             """)
             
             if db_configured:
-                if st.button("Execute Verification Import", type="primary", key="verify_btn"):
+                if st.button("Execute Verification Status Update", type="primary", key="verify_btn"):
                     with st.spinner("Executing..."):
                         exec_result = execute_verification_query(result['uuids'])
                     
@@ -189,7 +189,7 @@ with tab1:
                     else:
                         st.error(f"❌ Failed: {exec_result['error']}")
             else:
-                st.button("Execute Verification Import", type="primary", disabled=True, key="verify_btn_disabled")
+                st.button("Execute Verification Status Update", type="primary", disabled=True, key="verify_btn_disabled")
                 st.caption("⚠️ Configure database to enable")
         else:
             st.error(f"❌ {result['error']}")
@@ -199,14 +199,13 @@ with tab1:
         st.info("👆 Upload an Excel file to begin")
 
 with tab2:
-    st.subheader("Lab Result Sync")
-    st.markdown("Sync test results from `lims_result` to `laboratory_result` table.")
+    st.subheader("LIMS Result Correction")
+    st.markdown("Correct lab result round-off error")
     
     st.info("""
     **What this does:**
-    - Finds records where `test_result` differs from `result_reported`
-    - Updates `laboratory_result.result_reported` with the correct `test_result` value
-    - Only processes numeric results (matching pattern `\\d+\\.\\d+`)
+    - Corrects lan results that have been rounded off incorrectly by the LIMS system
+    `)
     """)
     
     with st.expander("View SQL Query", expanded=False):
@@ -265,18 +264,16 @@ WHERE r.uuid = s.uuid
             else:
                 st.error(f"❌ Failed: {exec_result['error']}")
     else:
-        st.button("🔄 Run Lab Result Sync", type="primary", disabled=True, key="lab_sync_btn_disabled")
+        st.button("🔄 Run Correction", type="primary", disabled=True, key="lab_sync_btn_disabled")
         st.caption("⚠️ Configure database to enable")
 
 with tab3:
-    st.subheader("Fix EAC Records")
-    st.markdown("Archive EAC records that have no associated sessions in the `hiv_eac` table.")
+    st.subheader("Fix Broken EAC Records")
+    st.markdown("Resets invisible EAC data")
     
     st.info("""
     **What this does:**
-    - Filters EAC records by `person_uuid` from uploaded Excel file
-    - Only updates records with no associated sessions in `hiv_eac_session`
-    - Sets `archived = 5` for matching records
+    - Resolves the issue where entered EAC data do not appear on RADET
     """)
     
     with st.expander("View SQL Query", expanded=False):
@@ -349,7 +346,7 @@ with tab4:
     
     if pmtct_page == "📝 Infant PCR Data Entry":
         st.subheader("PMTCT Infant PCR Data Entry")
-        st.markdown("Insert infant PCR records into the `pmtct_infant_pcr` table.")
+        st.markdown("Insert missing Infant PCR data attribute")
         
         pmtct_mode = st.radio(
             "Entry Mode",
@@ -580,7 +577,7 @@ with tab4:
             else:
                 st.info("👆 Upload an Excel file to begin bulk import")
     
-    else:
+    elif pmtct_page == "🔄 Update Testing Setting":
         st.subheader("Update Testing Setting")
         st.markdown("Update the testing setting for a patient in the `hts_risk_stratification` table.")
         

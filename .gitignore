@@ -9,6 +9,8 @@ __pycache__/
 *.xls
 venv/
 ENV/
+dist/
+build/
 .venv
 *.log
 .DS_Store
