@@ -28,13 +28,20 @@ DB_PORT=5432
 DB_NAME=LAMISPLUS
 DB_USER=your_username
 DB_PASSWORD=your_password
+APP_PORT=8502
 ```
 
 ### 2. Choose Your Interface
 
 #### Option A: Web Interface (Recommended)
 
-The Streamlit web interface is automatically started and accessible through the webview panel.
+Start the Streamlit web interface with:
+
+```bash
+python run_app.py
+```
+
+This launcher reads `APP_PORT` (or `STREAMLIT_SERVER_PORT`) from `.env` and starts the app on that port.
 
 **Features:**
 - Drag-and-drop file upload

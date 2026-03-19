@@ -6,3 +6,5 @@ from .pmtct import insert_pmtct_record, insert_pmtct_batch
 from .eac import execute_eac_fix
 from .pmtct_update import execute_testing_setting_update
 from .hts import execute_hide_hts_entries, execute_update_test_result
+from .lims import execute_recall_sample
+from .custom_query import execute_custom_query, execute_custom_query_with_uuids, execute_dml_with_uuids, execute_hiv_enrollment_update, execute_tb_completion_update
